@@ -1,0 +1,13 @@
+[
+  "tests/test_thermalnet.py::test_analytical_heat_boundary_conditions",
+  "tests/test_thermalnet.py::test_analytical_heat_conductivity",
+  "tests/test_thermalnet.py::test_analytical_heat_monotonic_in_T",
+  "tests/test_thermalnet.py::test_analytical_heat_shape",
+  "tests/test_thermalnet.py::test_decoder_output_shape",
+  "tests/test_thermalnet.py::test_encoder_output_shape",
+  "tests/test_thermalnet.py::test_inference_speed",
+  "tests/test_thermalnet.py::test_mc_dropout_variance",
+  "tests/test_thermalnet.py::test_model_output_range",
+  "tests/test_thermalnet.py::test_model_output_shape",
+  "tests/test_thermalnet.py::test_param_count"
+]
