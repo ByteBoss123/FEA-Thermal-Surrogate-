@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import pytest
 import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.surrogate import ThermalSurrogate, ConditionEncoder, SpatialDecoder
 from data.generate import analytical_heat

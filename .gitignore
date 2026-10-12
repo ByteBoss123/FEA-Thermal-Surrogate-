@@ -1,2 +1,5 @@
-# Created by pytest automatically.
-*
+__pycache__/
+.pytest_cache/
+data/processed/
+models/checkpoints/
+mlruns/

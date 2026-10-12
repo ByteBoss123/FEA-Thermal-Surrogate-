@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 import os, sys, time, json
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.surrogate import ThermalSurrogate
 
 
@@ -39,6 +39,9 @@ def load_model_and_data(model_path="models/checkpoints/best_model.pt",
     inputs_raw = np.load(f"{data_dir}/inputs_raw.npy")
 
     test_idx = splits["test"]
+    global FIELD_SCALE, FIELDS_RAW_TEST
+    FIELD_SCALE = float(np.load(f"{data_dir}/field_max.npy")[0])
+    FIELDS_RAW_TEST = np.load(f"{data_dir}/fields_raw.npy")[test_idx]
     return model, inputs[test_idx], fields[test_idx], inputs_raw[test_idx]
 
 
@@ -73,7 +76,25 @@ def evaluate(model, inputs, fields, inputs_raw, n_uq_samples=50, n_viz=4):
     print(f"  Median max error:        {np.median(max_err):.4f}")
     print(f"  95th pct max error:      {np.percentile(max_err, 95):.4f}")
     print(f"  Inference time:          {infer_time:.2f} ms/sample")
-    print(f"  vs analytical solver:    ~200ms/sample -> {200/infer_time:.0f}x speedup")
+    # Errors in degrees C against the raw fields
+    err_c = np.abs(Y_pred * FIELD_SCALE - FIELDS_RAW_TEST)
+    mae_c, max_c = float(err_c.mean()), err_c.reshape(len(inputs), -1).max(axis=1)
+    print(f"  Field MAE:               {mae_c:.3f} C (field scale {FIELD_SCALE:.1f} C)")
+    print(f"  95th pct max error:      {np.percentile(max_c, 95):.3f} C")
+    # Time the reference solver on the same inputs instead of assuming a number
+    import sys as _sys
+    _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from data.generate import analytical_heat
+    t0 = time.perf_counter()
+    for r in inputs_raw[:200]:
+        analytical_heat(*[float(v) for v in r])
+    solver_ms = (time.perf_counter() - t0) / 200 * 1000
+    t0 = time.perf_counter()
+    with torch.no_grad():
+        for i in range(200):
+            model(X[i:i + 1])
+    single_ms = (time.perf_counter() - t0) / 200 * 1000
+    print(f"  Reference solver:        {solver_ms:.2f} ms/sample; surrogate one-at-a-time {single_ms:.2f} ms")
 
     # --- UQ calibration on subset ---
     n_uq = min(200, len(inputs))
@@ -95,6 +116,12 @@ def evaluate(model, inputs, fields, inputs_raw, n_uq_samples=50, n_viz=4):
         "inference_ms_per_sample": float(infer_time),
         "uq_calibration_corr": float(corr),
         "n_test_samples": len(inputs),
+        "test_mae_celsius": mae_c,
+        "median_max_error_celsius": float(np.median(max_c)),
+        "p95_max_error_celsius": float(np.percentile(max_c, 95)),
+        "field_scale_celsius": FIELD_SCALE,
+        "reference_solver_ms_per_sample": float(solver_ms),
+        "surrogate_ms_single_sample": float(single_ms),
     }
 
     os.makedirs("results", exist_ok=True)
@@ -193,6 +220,6 @@ def _plot_error_dist(max_err, r2):
 
 if __name__ == "__main__":
     import os
-    os.chdir(os.path.dirname(os.path.dirname(__file__)))
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     model, inputs, fields, inputs_raw = load_model_and_data()
     metrics = evaluate(model, inputs, fields, inputs_raw)

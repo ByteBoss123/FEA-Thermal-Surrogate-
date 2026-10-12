@@ -13,7 +13,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import os, sys, json
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from models.surrogate import ThermalSurrogate
 
 
@@ -171,5 +171,5 @@ def train(
 
 if __name__ == "__main__":
     import os
-    os.chdir(os.path.dirname(os.path.dirname(__file__)))
-    model, history = train(epochs=60, use_mlflow=False)
+    os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    model, history = train(epochs=int(os.environ.get("EPOCHS", 60)), use_mlflow=False)

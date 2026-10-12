@@ -85,11 +85,6 @@ def generate_dataset(n=N_SAMPLES, seed=42):
     input_std  = inputs.std(axis=0)
     inputs_norm = (inputs - input_mean) / (input_std + 1e-8)
 
-    # Normalize fields (per-sample min-max for physical interpretability)
-    field_min = fields.reshape(n, -1).min(axis=1, keepdims=True).reshape(n, 1, 1)
-    field_max = fields.reshape(n, -1).max(axis=1, keepdims=True).reshape(n, 1, 1)
-    fields_norm = (fields - field_min) / (field_max - field_min + 1e-8)
-
     # Split 80/10/10
     idx = np.random.permutation(n)
     tr, va = int(0.8*n), int(0.9*n)
@@ -98,6 +93,14 @@ def generate_dataset(n=N_SAMPLES, seed=42):
         "val":   idx[tr:va],
         "test":  idx[va:]
     }
+
+    # Normalize fields by ONE global scale from the training set. (An earlier version min-max scaled each
+    # field by its own min and max, which the model cannot know at inference, so its outputs could not be
+    # turned back into degrees and its normalized errors overstated accuracy.)
+    field_scale = np.float32(fields[splits["train"]].max())
+    fields_norm = fields / field_scale
+    field_min = np.zeros((1,), dtype=np.float32)
+    field_max = np.array([field_scale], dtype=np.float32)
 
     os.makedirs("data/processed", exist_ok=True)
     np.save("data/processed/inputs_raw.npy", inputs)

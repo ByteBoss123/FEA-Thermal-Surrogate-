@@ -1,192 +1,55 @@
-# ThermalNet — ML Surrogate for FEA Thermal Simulation
+# ThermalNet: Neural Surrogate for 2D Steady-State Heat Fields
 
-> Replaces hours-long finite element analysis (FEA) with millisecond neural network inference for 2D steady-state heat diffusion problems.
+A network that maps five physical parameters to a 32×32 temperature field, with Monte Carlo dropout uncertainty
+and a FastAPI endpoint. Trained and scored on CPU, October 2026.
 
----
+**Problem.** A square plate held at 0 °C on three edges, with a sinusoidal temperature profile on the top edge
+and a Gaussian heat source inside. Inputs: top-edge temperature (50–500 °C), source strength, source position
+(x, y) and conductivity. Output: the temperature at 32×32 points.
 
-## Motivation
+**Reference data, stated plainly.** Targets come from `data/generate.py`: a 40-term Fourier series that solves
+Laplace's equation for the boundary conditions exactly, plus a hand-shaped Gaussian bump for the heat source.
+That source term is an approximation, not a solution of the heat equation, and no finite-element solver is
+involved. This is a surrogate for that reference function, which makes it a clean testbed for the method rather
+than a stand-in for FEA.
 
-In engineering design workflows (aerospace brackets, heat sinks, semiconductor packaging, turbine components), thermal FEA simulations can take minutes to hours per run. During design optimization, engineers need to evaluate thousands of configurations — making full FEA prohibitively slow.
+## Results (`results/metrics.json`, 1,000 held-out cases, 40 epochs)
 
-**ThermalNet** trains a neural surrogate on FEA-equivalent ground truth (analytical solutions to the 2D Laplace equation + heat source superposition), then replaces the solver with ~2ms inference. This enables real-time design space exploration and gradient-based optimization over physical parameters.
+| Metric | Result |
+|---|---|
+| Mean absolute error | **2.3 °C** (fields range 0–499 °C); R² 0.991 per field on average |
+| Worst point in a field | 13.4 °C median, 21.5 °C at the 95th percentile, mostly near the heat source |
+| Uncertainty quality | Correlation between MC-dropout std and actual error: **0.32** (weak but positive) |
+| Speed | Surrogate 1.3 ms per case in a batch, 1.9 ms one at a time; the reference solver takes **1.35 ms**, so there is **no speedup on this problem** |
 
-This is the same approach used in production by companies like PhysicsX, NVIDIA Modulus, and DeepMind for scientific ML.
+The speed result is the important one. The surrogate only pays off when the reference solver is expensive, as a
+real FEA mesh solve would be. Here the reference is a cheap closed-form series, so the network is about as fast
+as what it imitates.
 
----
+## What changed in the October 2026 rebuild
 
-## Problem Setup
-
-**Physical domain:** 2D rectangular plate (normalized 1×1)
-
-**Boundary conditions:**
-- Bottom, left, right edges: T = 0°C (Dirichlet)
-- Top edge: T = T_top × sin(πx) (sinusoidal profile)
-- Internal Gaussian heat source at (cx, cy) with intensity Q
-
-**Material:** Thermal conductivity k (normalized: 0.5 = titanium, 1.0 = steel, 2.0 = aluminum)
-
-**Input:** 5 physical parameters → [T_top, Q, cx, cy, k]  
-**Output:** 32×32 temperature field (°C)
-
----
+- **Removed claims that were never measured.** The previous README reported R² ≈ 0.97, MAE ≈ 0.018 and a ~100×
+  speedup "from full GPU training". The metrics file committed alongside it showed R² −0.83, and the speedup was a
+  hard-coded 200 ms solver time, not a measurement.
+- **Fixed a normalization flaw.** Each field was min-max scaled by its own minimum and maximum, which the model
+  cannot know when predicting, so its output could not be turned back into °C (the API approximated it with the
+  top-edge temperature). Fields are now scaled by one constant from the training set, and errors are reported in °C.
+- **Measured the reference solver** on the same cases instead of assuming its runtime.
+- Restored the `data/`, `models/`, `tests/` layout that the imports expected; 11 tests pass.
 
 ## Architecture
 
-```
-Physical params (5) 
-    ↓
-ConditionEncoder (MLP: 5 → 64 → 128 → latent_dim)
-    ↓ latent vector
-SpatialDecoder (Transposed CNN: 4×4 → 8×8 → 16×16 → 32×32)
-    ↓
-Temperature field (32×32), normalized [0,1]
-```
+Five parameters → MLP encoder (5 → 64 → 128 → latent) → transposed-CNN decoder (4×4 → 32×32) → sigmoid.
+Loss is MSE plus a gradient-matching term that penalizes jagged fields. Dropout stays on at inference; 50 passes
+give a mean field and a per-point standard deviation.
 
-**Uncertainty Quantification:** Monte Carlo Dropout — dropout stays active at inference, N forward passes produce mean prediction + epistemic uncertainty field. Uncertainty correlates with regions of high physical complexity (near boundaries, near heat source).
-
-**Physics-informed loss:**
-```
-L = MSE(pred, target) + λ × GradientLoss(pred, target)
-```
-Gradient regularization penalizes unphysical spatial discontinuities in the predicted field.
-
----
-
-## Results (Full Training — GPU, 60 epochs, 10K samples)
-
-| Metric | Value |
-|--------|-------|
-| Field MAE (normalized) | ~0.018 |
-| Field RMSE (normalized) | ~0.024 |
-| Mean R² | ~0.97 |
-| Inference time | ~2 ms/sample |
-| vs FEA speedup | **~100×** |
-| UQ calibration (std↔error corr) | ~0.72 |
-
-*Note: Metrics above are from full GPU training. CPU demo run produces weaker metrics — see [Training](#training).*
-
----
-
-## Project Structure
+## Run
 
 ```
-thermalnet/
-├── data/
-│   ├── generate.py          # FEA-equivalent dataset generator (analytical solution)
-│   └── processed/           # Generated .npy files (after running generate.py)
-├── models/
-│   ├── surrogate.py         # ThermalSurrogate model (ConditionEncoder + SpatialDecoder)
-│   ├── train.py             # Training loop with MLflow tracking
-│   ├── evaluate.py          # Metrics, UQ calibration, visualizations
-│   └── checkpoints/         # Saved model weights
-├── api/
-│   └── main.py              # FastAPI inference service
-├── results/                 # Evaluation plots
-│   ├── field_comparison.png
-│   ├── uncertainty_calibration.png
-│   └── error_distribution.png
-└── tests/
-    └── test_thermalnet.py   # 11 unit tests (architecture, physics, speed)
+pip install numpy scipy torch matplotlib fastapi uvicorn pytest
+python data/generate.py              # 10,000 cases, 80/10/10 split, ~10 s
+EPOCHS=40 python models/train.py      # ~40 min on 2 CPU cores
+python models/evaluate.py             # writes results/
+python -m pytest -q tests
+uvicorn main:app                      # POST /predict
 ```
-
----
-
-## Quickstart
-
-```bash
-# Install dependencies
-pip install torch numpy scipy scikit-learn fastapi uvicorn matplotlib pytest mlflow
-
-# 1. Generate dataset (10K FEA-equivalent samples)
-python data/generate.py
-
-# 2. Train surrogate
-python models/train.py
-
-# 3. Evaluate
-python models/evaluate.py
-
-# 4. Run tests
-pytest tests/ -v
-
-# 5. Start inference API
-cd api && uvicorn main:app --reload
-```
-
----
-
-## Training
-
-```bash
-python models/train.py
-# Configurable: epochs, batch_size, lr, latent_dim, dropout_p, grad_weight
-# MLflow tracking: set use_mlflow=True (requires mlflow installed)
-```
-
-Training logs MSE, MAE, max-error, and UQ calibration correlation to MLflow per epoch. Best checkpoint auto-saved to `models/checkpoints/best_model.pt`.
-
-**Hardware recommendation:** GPU strongly preferred. Full convergence (~60 epochs, 10K samples) takes ~5 min on GPU vs several hours on CPU.
-
----
-
-## API
-
-```bash
-uvicorn api.main:app --reload
-# Docs at http://localhost:8000/docs
-```
-
-**POST /predict** — fast inference (no UQ):
-```json
-{
-  "T_top": 300.0,
-  "Q": 1.0,
-  "cx": 0.5,
-  "cy": 0.5,
-  "k": 1.0
-}
-```
-
-**POST /predict/uq?n_samples=50** — mean field + epistemic uncertainty via MC Dropout
-
-**GET /model/info** — architecture metadata, val metrics, parameter count
-
----
-
-## Tests
-
-```
-11 tests covering:
-  ✓ Model output shape and range
-  ✓ MC Dropout produces non-zero variance
-  ✓ Parameter count < 2M
-  ✓ Analytical solution boundary conditions
-  ✓ Physical monotonicity (higher T_top → higher mean temperature)
-  ✓ Conductivity effect (higher k → more diffusion)
-  ✓ Inference speed < 50ms on CPU
-```
-
----
-
-## Extensions
-
-- **Graph Neural Networks:** Replace CNN decoder with GNN for irregular mesh geometries (direct path to real FEA meshes)
-- **Continual learning:** Update surrogate online as new FEA runs arrive
-- **3D fields:** Extend to 3D thermal/structural problems (volumetric decoder)
-- **Multi-physics:** Add structural stress field as second output head
-- **Active learning:** Query FEA solver only in high-uncertainty regions
-
----
-
-## Tech Stack
-
-`PyTorch` · `NumPy` · `SciPy` · `Scikit-learn` · `FastAPI` · `MLflow` · `Matplotlib` · `pytest`
-
----
-
-## References
-
-- Raissi et al. (2019) — Physics-Informed Neural Networks
-- Lu et al. (2021) — DeepONet: Learning nonlinear operators
-- Thuerey et al. (2020) — Deep Learning Methods for Reynolds-Averaged Navier-Stokes
-- PhysicsX (2023) — AI-driven simulation for engineering design

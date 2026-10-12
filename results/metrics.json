@@ -1,0 +1,16 @@
+{
+  "test_mae": 0.004638764541596174,
+  "test_rmse": 0.00644671730697155,
+  "mean_r2": 0.9908608198165894,
+  "median_max_error": 0.026879534125328064,
+  "p95_max_error": 0.04298127442598343,
+  "inference_ms_per_sample": 1.268400333999999,
+  "uq_calibration_corr": 0.3212880990403924,
+  "n_test_samples": 1000,
+  "test_mae_celsius": 2.315816879272461,
+  "median_max_error_celsius": 13.419105529785156,
+  "p95_max_error_celsius": 21.457622528076172,
+  "field_scale_celsius": 499.23138427734375,
+  "reference_solver_ms_per_sample": 1.3497687049999918,
+  "surrogate_ms_single_sample": 1.9081892300000014
+}

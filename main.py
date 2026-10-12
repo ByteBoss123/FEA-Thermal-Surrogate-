@@ -17,7 +17,7 @@ import numpy as np
 import torch
 import os, sys, json, time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from models.surrogate import ThermalSurrogate
 
 app = FastAPI(
@@ -64,8 +64,7 @@ def load_model():
     # Load normalization stats
     _stats["input_mean"] = np.load(f"{DATA_PATH}/input_mean.npy")
     _stats["input_std"]  = np.load(f"{DATA_PATH}/input_std.npy")
-    _stats["field_min"]  = np.load(f"{DATA_PATH}/field_min.npy")  # (N,1,1)
-    _stats["field_max"]  = np.load(f"{DATA_PATH}/field_max.npy")
+    _stats["field_scale"] = float(np.load(f"{DATA_PATH}/field_max.npy")[0])  # global training-set max, deg C
 
     print(f"Model loaded | epoch={_meta['trained_epoch']} | val_mae={_meta['val_mae']}")
 
@@ -128,11 +127,8 @@ def normalize_input(params: PhysicalParams) -> torch.Tensor:
 
 
 def denormalize_field(field_norm: np.ndarray, T_top: float) -> np.ndarray:
-    """
-    Approximate denormalization: scale [0,1] field back to Celsius.
-    Uses T_top as the expected max since top BC drives the scale.
-    """
-    return field_norm * T_top
+    """Fields are normalized by one global scale (the training-set maximum), so this is exact."""
+    return field_norm * _stats["field_scale"]
 
 
 # ---------- Endpoints ----------
